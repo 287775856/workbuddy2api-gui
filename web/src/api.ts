@@ -81,6 +81,12 @@ export const api = {
   login: (username: string, password: string) =>
     post<{ token: string; username: string }>('/api/login', { username, password }),
   logout: () => post<{ ok: boolean }>('/api/logout'),
+  changePassword: (current: string, next: string, newUsername?: string) =>
+    post<{ ok: boolean; username: string; message: string; relogin?: boolean }>('/api/password', {
+      current_password: current,
+      new_password: next,
+      new_username: newUsername,
+    }),
 
   // 总览 / 账号
   overview: () => get<Overview>('/api/overview'),
@@ -105,7 +111,7 @@ export const api = {
   task: (id: string) => get<TaskView>(`/api/tasks/${encodeURIComponent(id)}`),
 
   // 网页登录
-  loginStart: () => post<LoginSession>('/api/login/start'),
+  loginStart: (region: 'cn' | 'global') => post<LoginSession>('/api/login/start', { region }),
   loginPoll: (id: string) => post<LoginSession>(`/api/login/${encodeURIComponent(id)}/poll`),
   loginStatus: (id: string) => get<LoginSession>(`/api/login/${encodeURIComponent(id)}`),
   loginCancel: (id: string) => post<LoginSession>(`/api/login/${encodeURIComponent(id)}/cancel`),

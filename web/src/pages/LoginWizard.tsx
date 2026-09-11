@@ -20,6 +20,7 @@ export default function LoginWizard({
   const [copied, setCopied] = useState(false)
   const pollRef = useRef<number | null>(null)
   const [manualUID, setManualUID] = useState<string | null>(null)
+  const [region, setRegion] = useState<'cn' | 'global'>('cn')
 
   // 清理轮询定时器，避免离开页面后继续打接口。
   useEffect(() => {
@@ -40,7 +41,7 @@ export default function LoginWizard({
     setBusy(true)
     stopPolling()
     try {
-      const s = await api.loginStart()
+      const s = await api.loginStart(region)
       setSess(s)
       // 自动开始轮询：用户完成浏览器登录后无需手动点。
       pollRef.current = window.setInterval(() => void poll(s.id), 2500)
@@ -101,7 +102,7 @@ export default function LoginWizard({
       <div className="page-head">
         <div>
           <h1>添加账号</h1>
-          <p>通过腾讯 CodeBuddy OAuth 设备授权登录，把账号加入 workbuddy2api 账号池</p>
+          <p>通过 WorkBuddy OAuth 设备授权登录（支持国内版 / 国际版），把账号加入账号池</p>
         </div>
         <div className="page-actions">
           <Link className="btn" to="/accounts">
@@ -156,20 +157,34 @@ export default function LoginWizard({
           <div className="card-head">
             <h2>第 1 步 · 发起设备授权</h2>
           </div>
+          <div className="field">
+            <label>账号区域</label>
+            <select value={region} onChange={(e) => setRegion(e.target.value as 'cn' | 'global')} style={{ maxWidth: 340 }}>
+              <option value="cn">国内版（copilot.tencent.com / codebuddy.cn）</option>
+              <option value="global">国际版（workbuddy.ai）</option>
+            </select>
+            <div className="desc">
+              国内版走腾讯 CodeBuddy（codebuddy.cn），国际版走 WorkBuddy Global（workbuddy.ai）。请选择与你账号匹配的区域。
+            </div>
+          </div>
           <p className="text-dim" style={{ marginTop: 0, fontSize: 13 }}>
-            点击下方按钮后，本面板会向腾讯 CodeBuddy 申请一个一次性授权链接（有效期约 15 分钟），
+            点击下方按钮后，本面板会向对应区域的 WorkBuddy 申请一个一次性授权链接（有效期约 15 分钟），
             你在浏览器中打开并完成登录即可，无需在服务器上执行任何命令。
           </p>
           <Alert kind="info">
             <strong>前置要求</strong>
             <ul style={{ margin: '5px 0 0', paddingLeft: 18 }}>
-              <li>需要一台能访问 <span className="mono">copilot.tencent.com</span> 的服务器（本面板需能出网）</li>
-              <li>准备一个已注册的 CodeBuddy / 腾讯云账号用于授权</li>
+              <li>
+                需要一台能访问
+                <span className="mono">{region === 'global' ? ' workbuddy.ai ' : ' copilot.tencent.com '}</span>
+                的服务器（本面板需能出网）
+              </li>
+              <li>准备一个已注册的 WorkBuddy 账号用于授权</li>
               <li>多账号：重复本流程即可，每次会生成独立的授权链接</li>
             </ul>
           </Alert>
           <button className="btn btn-primary" onClick={() => void start()} disabled={busy || writeDisabled}>
-            {busy ? <Spinner /> : '🔑'} 发起授权
+            {busy ? <Spinner /> : '🔑'} 发起授权（{region === 'global' ? '国际版' : '国内版'}）
           </button>
         </div>
       )}
@@ -215,7 +230,7 @@ export default function LoginWizard({
             <h2>第 3 步 · 保存凭证</h2>
           </div>
           <Alert kind="ok">
-            登录成功！
+            登录成功！（{sess.region === 'global' ? '国际版' : '国内版'}）
             <div style={{ marginTop: 6 }}>
               账号：<strong>{sess.nickname || sess.uid?.slice(0, 8)}</strong>
               <span className="mono text-faint"> ({sess.uid})</span>

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import type { SessionInfo, SystemInfo, TaskListResponse } from '../types'
-import { Alert, Badge, ConfirmDialog, fmtDuration, fmtISO, Spinner } from '../ui'
+import { Alert, Badge, ConfirmDialog, fmtDuration, fmtISO, Modal, Spinner } from '../ui'
 
 export default function System({
   session,
@@ -19,6 +19,7 @@ export default function System({
   const [notice, setNotice] = useState<string | null>(null)
   const [confirmRestart, setConfirmRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -165,6 +166,14 @@ export default function System({
       <div className="card">
         <div className="card-head">
           <h2>面板信息</h2>
+          <button
+            className="btn btn-sm"
+            onClick={() => setShowPassword(true)}
+            disabled={!session.password_changeable}
+            title={session.password_changeable ? '修改面板登录口令' : '服务端未配置凭据持久化，无法从网页改密码'}
+          >
+            🔑 修改密码
+          </button>
         </div>
         <dl className="kv">
           <dt>面板版本</dt>
@@ -298,6 +307,115 @@ curl ${info?.gateway_url || 'http://127.0.0.1:7863'}/v1/chat/completions \\
           }
         />
       )}
+
+      {showPassword && (
+        <ChangePasswordDialog
+          currentUser={session.username}
+          onClose={() => setShowPassword(false)}
+          onDone={async () => {
+            setShowPassword(false)
+            await onSessionRefresh()
+          }}
+        />
+      )}
     </>
+  )
+}
+
+/** ChangePasswordDialog 修改面板登录口令。 */
+function ChangePasswordDialog({
+  currentUser,
+  onClose,
+  onDone,
+}: {
+  currentUser: string
+  onClose: () => void
+  onDone: () => Promise<void>
+}) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [newUsername, setNewUsername] = useState(currentUser)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+
+  const submit = async () => {
+    setError(null)
+    if (!current) {
+      setError('请输入当前口令')
+      return
+    }
+    if (next.length < 6) {
+      setError('新口令至少 6 位')
+      return
+    }
+    if (next !== confirm) {
+      setError('两次输入的新口令不一致')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await api.changePassword(current, next, newUsername)
+      setDone(res.message || '口令已修改')
+      // 改成功后可无缝继续（后端已重发会话 Cookie）。
+      await onDone()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '修改失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal
+      title="修改登录口令"
+      onClose={onClose}
+      footer={
+        done ? (
+          <button className="btn btn-primary" onClick={onClose}>
+            完成
+          </button>
+        ) : (
+          <>
+            <button className="btn" onClick={onClose} disabled={busy}>
+              取消
+            </button>
+            <button className="btn btn-primary" onClick={() => void submit()} disabled={busy}>
+              {busy ? <Spinner /> : null}
+              保存修改
+            </button>
+          </>
+        )
+      }
+    >
+      {done ? (
+        <Alert kind="ok">{done}</Alert>
+      ) : (
+        <>
+          {error && <Alert kind="error">{error}</Alert>}
+          <div className="field">
+            <label>用户名</label>
+            <input type="text" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} autoComplete="username" />
+            <div className="desc">可同时修改登录用户名，留空则沿用当前用户名。</div>
+          </div>
+          <div className="field">
+            <label>当前口令</label>
+            <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" autoFocus />
+          </div>
+          <div className="field">
+            <label>新口令（至少 6 位）</label>
+            <input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>确认新口令</label>
+            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
+          </div>
+          <div className="desc" style={{ marginTop: 12 }}>
+            修改后所有已登录会话立即失效，需用新口令重新登录（本页面会自动续期）。
+          </div>
+        </>
+      )}
+    </Modal>
   )
 }

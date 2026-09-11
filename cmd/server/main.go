@@ -39,6 +39,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
+	// 网页改密码的持久化：若存在凭据文件，覆盖内存中的用户名/密码。
+	cfg.LoadStoredCredentials()
 
 	// 凭证目录：不存在时创建（首次部署常见：网关还没登录过任何账号）。
 	store, err := authstore.New(cfg.UpstreamAuthDir)

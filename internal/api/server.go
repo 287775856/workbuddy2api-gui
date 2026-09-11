@@ -14,6 +14,7 @@ import (
 	"workbuddy2api-gui/internal/config"
 	"workbuddy2api-gui/internal/gateway"
 	"workbuddy2api-gui/internal/ops"
+	"workbuddy2api-gui/internal/upstream"
 )
 
 // Server API 服务器。
@@ -46,6 +47,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session", s.handleSessionInfo)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/logout", s.handleLogout)
+	mux.HandleFunc("POST /api/password", s.handleChangePassword)
 
 	// ── 总览 / 账号 ───────────────────────────────────────
 	mux.HandleFunc("GET /api/overview", s.handleOverview)
@@ -298,8 +300,24 @@ func (s *Server) handleTaskDetail(w http.ResponseWriter, r *http.Request) {
 // 网页登录
 // ---------------------------------------------------------------------------
 
+// loginStartRequest 发起登录的请求：region 决定走国内版还是国际版。
+type loginStartRequest struct {
+	Region string `json:"region"`
+}
+
 func (s *Server) handleLoginStart(w http.ResponseWriter, r *http.Request) {
-	sess, err := s.svc.StartLogin()
+	// region 允许缺省（默认 cn）；非法值直接拒绝。
+	var req loginStartRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		// 允许空 body：region 缺省为 cn。
+		req.Region = "cn"
+	}
+	region, err := upstream.NormalizeRegion(req.Region)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	sess, err := s.svc.StartLogin(region)
 	if err != nil {
 		writeError(w, err)
 		return

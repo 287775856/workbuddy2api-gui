@@ -1,5 +1,6 @@
-// Package upstream 直连腾讯 CodeBuddy 上游（copilot.tencent.com / codebuddy.cn）的客户端，
-// 用于 GUI 侧的 OAuth 登录、token 刷新、签到、余额查询与猫猫旅行。
+// Package upstream 直连 WorkBuddy 上游（CN: copilot.tencent.com / codebuddy.cn，
+// GLOBAL: workbuddy.ai）的客户端，用于 GUI 侧的 OAuth 登录、token 刷新、签到、
+// 余额查询与猫猫旅行。
 //
 // 请求头/路径/信封格式与 workbuddy2api/internal/upstream 保持一致，保证同一账号
 // 在网关与 GUI 两侧看到的指纹相同、行为可预期。
@@ -18,20 +19,45 @@ import (
 	"workbuddy2api-gui/internal/authstore"
 )
 
-// 上游常量（CN realm）。
-const (
-	ChatBaseCN    = "https://copilot.tencent.com"
-	BillingBaseCN = "https://www.codebuddy.cn"
+// Region 上游区域。
+type Region string
 
-	clientUA      = "CLI/2.63.2 CodeBuddy/2.63.2"
-	originReferer = "https://www.codebuddy.cn"
+const (
+	// RegionCN 国内版（copilot.tencent.com / codebuddy.cn）。
+	RegionCN Region = "cn"
+	// RegionGlobal 国际版（workbuddy.ai）。
+	RegionGlobal Region = "global"
+)
+
+// NormalizeRegion 规范化 region 字符串（大小写/空白容错）；非法值返回错误。
+func NormalizeRegion(s string) (Region, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "cn":
+		return RegionCN, nil
+	case "global":
+		return RegionGlobal, nil
+	default:
+		return "", fmt.Errorf("未知区域 %q（可选 cn | global）", s)
+	}
+}
+
+// 上游常量。
+const (
+	ChatBaseCN        = "https://copilot.tencent.com"
+	BillingBaseCN     = "https://www.codebuddy.cn"
+	ChatBaseGlobal    = "https://www.workbuddy.ai"
+	BillingBaseGlobal = "https://www.workbuddy.ai"
+
+	clientUA     = "CLI/2.63.2 CodeBuddy/2.63.2"
+	originCN     = "https://www.codebuddy.cn"
+	originGlobal = "https://www.workbuddy.ai"
 
 	// EndpointAuthState 设备授权：申请 state + authUrl。
-	EndpointAuthState = ChatBaseCN + "/v2/plugin/auth/state?platform=CLI"
+	EndpointAuthState = "/v2/plugin/auth/state?platform=CLI"
 	// EndpointAuthToken 轮询登录结果（state 由服务端签发，无 PKCE）。
-	EndpointAuthToken = ChatBaseCN + "/v2/plugin/auth/token?state="
+	EndpointAuthToken = "/v2/plugin/auth/token?state="
 	// EndpointLoginAccount 拿 uid / nickname / enterpriseId。
-	EndpointLoginAccount = ChatBaseCN + "/v2/plugin/login/account?state="
+	EndpointLoginAccount = "/v2/plugin/login/account?state="
 
 	// growth 域「猫猫旅行」路径。
 	TravelStatusPath   = "/activity/growth/buddy/travel/status"
@@ -216,13 +242,47 @@ type apiEnvelope struct {
 	Data json.RawMessage `json:"data"`
 }
 
-// commonHeaders 设置所有 API 共享的请求头。
-func commonHeaders(req *http.Request) {
+// regionBases 返回 region 对应的 chat 基址、billing 基址与 Origin/Referer。
+func regionBases(region Region) (chatBase, billingBase, origin string) {
+	if region == RegionGlobal {
+		return ChatBaseGlobal, BillingBaseGlobal, originGlobal
+	}
+	return ChatBaseCN, BillingBaseCN, originCN
+}
+
+// regionOfAccount 从账号 domain 反推 region；空/未知 domain 按 CN 处理。
+func regionOfAccount(a *authstore.Account) Region {
+	if a == nil {
+		return RegionCN
+	}
+	d := strings.ToLower(strings.TrimSpace(a.Domain))
+	d = strings.TrimPrefix(strings.TrimPrefix(d, "https://"), "http://")
+	if d == "workbuddy.ai" || strings.HasSuffix(d, ".workbuddy.ai") {
+		return RegionGlobal
+	}
+	return RegionCN
+}
+
+// chatBase 返回账号所属 region 的聊天基址。
+func (c *Client) chatBase(a *authstore.Account) string {
+	base, _, _ := regionBases(regionOfAccount(a))
+	return base
+}
+
+// billingBase 返回账号所属 region 的计费基址。
+func (c *Client) billingBase(a *authstore.Account) string {
+	_, base, _ := regionBases(regionOfAccount(a))
+	return base
+}
+
+// commonHeaders 设置所有 API 共享的请求头（按 region 设置 Origin/Referer）。
+func commonHeaders(req *http.Request, region Region) {
+	_, _, origin := regionBases(region)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("Origin", originReferer)
-	req.Header.Set("Referer", originReferer+"/")
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Referer", origin+"/")
 	req.Header.Set("User-Agent", clientUA)
 }
 
@@ -305,12 +365,13 @@ func describeBody(status int, raw []byte) string {
 // ---------------------------------------------------------------------------
 
 // StartLogin 申请设备授权，返回 state 与用户需在浏览器打开的授权 URL。
-func (c *Client) StartLogin() (state, authURL string, err error) {
-	req, err := http.NewRequest(http.MethodPost, EndpointAuthState, bytes.NewReader([]byte("{}")))
+func (c *Client) StartLogin(region Region) (state, authURL string, err error) {
+	base, _, _ := regionBases(region)
+	req, err := http.NewRequest(http.MethodPost, base+EndpointAuthState, bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return "", "", err
 	}
-	commonHeaders(req)
+	commonHeaders(req, region)
 	data, err := c.doJSON(req)
 	if err != nil {
 		return "", "", err
@@ -322,25 +383,32 @@ func (c *Client) StartLogin() (state, authURL string, err error) {
 	if err := json.Unmarshal(data, &st); err != nil {
 		return "", "", fmt.Errorf("授权响应解析失败: %w", err)
 	}
-	if st.State == "" || st.AuthURL == "" {
-		return "", "", fmt.Errorf("授权响应缺少 state 或 authUrl")
+	if st.State == "" {
+		return "", "", fmt.Errorf("授权响应缺少 state")
 	}
-	return st.State, st.AuthURL, nil
+	// 上游偶发缺 authUrl（尤其 global），此时用 base 兜底拼一个登录页。
+	url := st.AuthURL
+	if url == "" {
+		url = base + "/login?state=" + st.State + "&platform=CLI"
+	}
+	return st.State, url, nil
 }
 
 // PollLogin 轮询一次登录结果。
 //
 // 返回 (nil, nil) 表示用户尚未完成登录（预期状态，前端继续轮询）；
 // 返回非 nil Account 表示登录成功（accessToken/uid 已填充，但尚未落盘）。
-func (c *Client) PollLogin(state string) (*authstore.Account, error) {
+func (c *Client) PollLogin(region Region, state string) (*authstore.Account, error) {
 	if strings.TrimSpace(state) == "" {
 		return nil, fmt.Errorf("缺少 state")
 	}
-	req, err := http.NewRequest(http.MethodGet, EndpointAuthToken+state, nil)
+	base, _, _ := regionBases(region)
+
+	req, err := http.NewRequest(http.MethodGet, base+EndpointAuthToken+state, nil)
 	if err != nil {
 		return nil, err
 	}
-	commonHeaders(req)
+	commonHeaders(req, region)
 	data, err := c.doJSON(req)
 	if err != nil {
 		var ue *Error
@@ -360,6 +428,14 @@ func (c *Client) PollLogin(state string) (*authstore.Account, error) {
 		// 拿不到 token 视为尚未完成，让前端继续轮询。
 		return nil, nil
 	}
+	// global 上游可能不返回 domain，按 region 兜底写入，保证 regionOfAccount 判得准。
+	if tok.Domain == "" {
+		if region == RegionGlobal {
+			tok.Domain = "www.workbuddy.ai"
+		} else {
+			tok.Domain = "copilot.tencent.com"
+		}
+	}
 	acct := &authstore.Account{
 		AccessToken:  tok.AccessToken,
 		RefreshToken: tok.RefreshToken,
@@ -369,9 +445,9 @@ func (c *Client) PollLogin(state string) (*authstore.Account, error) {
 		acct.ExpiresAt = time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second).Unix()
 	}
 	// login/account 拿 uid / nickname / enterpriseId（带 Bearer；失败不视为登录失败）。
-	acctReq, err := http.NewRequest(http.MethodGet, EndpointLoginAccount+state, nil)
+	acctReq, err := http.NewRequest(http.MethodGet, base+EndpointLoginAccount+state, nil)
 	if err == nil {
-		commonHeaders(acctReq)
+		commonHeaders(acctReq, region)
 		acctReq.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 		if resp, err := c.HTTP.Do(acctReq); err == nil {
 			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -394,9 +470,6 @@ func (c *Client) PollLogin(state string) (*authstore.Account, error) {
 	if acct.UID == "" {
 		return nil, fmt.Errorf("登录成功但未能获取 uid，请稍后重试或改用 login.sh")
 	}
-	if acct.Domain == "" {
-		acct.Domain = "copilot.tencent.com"
-	}
 	return acct, nil
 }
 
@@ -409,11 +482,12 @@ func (c *Client) RefreshToken(a *authstore.Account) error {
 	if strings.TrimSpace(a.RefreshToken) == "" {
 		return fmt.Errorf("账号缺少 refreshToken，无法刷新（需重新登录）")
 	}
-	req, err := http.NewRequest(http.MethodPost, ChatBaseCN+"/v2/plugin/auth/token/refresh", nil)
+	region := regionOfAccount(a)
+	req, err := http.NewRequest(http.MethodPost, c.chatBase(a)+"/v2/plugin/auth/token/refresh", nil)
 	if err != nil {
 		return err
 	}
-	commonHeaders(req)
+	commonHeaders(req, region)
 	req.Header.Set("X-Refresh-Token", a.RefreshToken)
 	if a.EnterpriseID != "" {
 		req.Header.Set("X-Enterprise-Id", a.EnterpriseID)
@@ -456,7 +530,7 @@ type CheckinResult struct {
 
 // DailyCheckin 执行每日签到。已签到不视为失败，返回 Already=true。
 func (c *Client) DailyCheckin(a *authstore.Account) (*CheckinResult, error) {
-	req, err := http.NewRequest(http.MethodPost, BillingBaseCN+"/v2/billing/meter/daily-checkin", bytes.NewReader([]byte("{}")))
+	req, err := http.NewRequest(http.MethodPost, c.billingBase(a)+"/v2/billing/meter/daily-checkin", bytes.NewReader([]byte("{}")))
 	if err != nil {
 		return nil, err
 	}
@@ -506,7 +580,7 @@ func (c *Client) UserResource(a *authstore.Account) (*Credits, error) {
 		"PackageEndTimeRangeBegin": now.Format("2006-01-02 15:04:05"),
 		"PackageEndTimeRangeEnd":   now.Add(365 * 101 * 24 * time.Hour).Format("2006-01-02 15:04:05"),
 	})
-	req, err := http.NewRequest(http.MethodPost, BillingBaseCN+"/v2/billing/meter/get-user-resource", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, c.billingBase(a)+"/v2/billing/meter/get-user-resource", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -608,7 +682,7 @@ func (c *Client) growthJSON(a *authstore.Account, method, path string, body any)
 		}
 		rdr = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequest(method, ChatBaseCN+path, rdr)
+	req, err := http.NewRequest(method, c.chatBase(a)+path, rdr)
 	if err != nil {
 		return nil, err
 	}

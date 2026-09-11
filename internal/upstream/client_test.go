@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"workbuddy2api-gui/internal/authstore"
 )
 
 // TestClassify 错误分类决定给用户的处置建议，必须准确。
@@ -176,10 +178,61 @@ func TestTruncate(t *testing.T) {
 func TestStartLoginRejectsMissingFields(t *testing.T) {
 	// 端点地址是常量，无法在单测里替换；这里验证入参校验分支。
 	c := New(5)
-	if _, err := c.PollLogin(""); err == nil {
+	if _, err := c.PollLogin(RegionCN, ""); err == nil {
 		t.Error("空 state 应报错")
 	}
-	if _, err := c.PollLogin("   "); err == nil {
+	if _, err := c.PollLogin(RegionCN, "   "); err == nil {
 		t.Error("空白 state 应报错")
+	}
+}
+
+// TestNormalizeRegion 区域规范化。
+func TestNormalizeRegion(t *testing.T) {
+	cases := map[string]Region{
+		"":       RegionCN,
+		"cn":     RegionCN,
+		"CN":     RegionCN,
+		"  Cn ":  RegionCN,
+		"global": RegionGlobal,
+		"GLOBAL": RegionGlobal,
+	}
+	for in, want := range cases {
+		if got, err := NormalizeRegion(in); err != nil || got != want {
+			t.Errorf("NormalizeRegion(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	if _, err := NormalizeRegion("japan"); err == nil {
+		t.Error("非法区域应报错")
+	}
+}
+
+// TestRegionOfAccount 按账号 domain 反推区域。
+func TestRegionOfAccount(t *testing.T) {
+	cases := []struct {
+		domain string
+		want   Region
+	}{
+		{"www.workbuddy.ai", RegionGlobal},
+		{"workbuddy.ai", RegionGlobal},
+		{"copilot.tencent.com", RegionCN},
+		{"codebuddy.cn", RegionCN},
+		{"", RegionCN},
+	}
+	for _, c := range cases {
+		if got := regionOfAccount(&authstore.Account{Domain: c.domain}); got != c.want {
+			t.Errorf("regionOfAccount(%q) = %v, want %v", c.domain, got, c.want)
+		}
+	}
+}
+
+// TestRegionBases 区域基址与 Origin。
+func TestRegionBases(t *testing.T) {
+	chat, billing, origin := regionBases(RegionGlobal)
+	if chat != "https://www.workbuddy.ai" || billing != "https://www.workbuddy.ai" || origin != "https://www.workbuddy.ai" {
+		t.Errorf("global bases = %q/%q/%q", chat, billing, origin)
+	}
+	chat, billing, origin = regionBases(RegionCN)
+	if chat != "https://copilot.tencent.com" || billing != "https://www.codebuddy.cn" || origin != "https://www.codebuddy.cn" {
+		t.Errorf("cn bases = %q/%q/%q", chat, billing, origin)
 	}
 }

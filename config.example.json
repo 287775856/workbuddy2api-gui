@@ -5,6 +5,7 @@
   "auth_dir": "/root/workbuddy2api/auths",
   "config_file": "/root/workbuddy2api/config.json",
   "backup_dir": "./data/backups",
+  "credentials_file": "./data/credentials.json",
   "docker_container": "workbuddy2api",
   "dangerous_ops": false,
   "read_only": false,

@@ -148,6 +148,7 @@ export type LoginState = 'pending' | 'success' | 'error' | 'expired' | 'cancelle
 
 export interface LoginSession {
   id: string
+  region: 'cn' | 'global'
   auth_url: string
   status: LoginState
   message?: string
@@ -181,6 +182,8 @@ export interface SessionInfo {
   dangerous_ops: boolean
   using_default_password: boolean
   gateway_url: string
+  /** 服务端是否支持网页改密码（配置了 credentials_file）。 */
+  password_changeable?: boolean
 }
 
 export interface ConfigMeta {

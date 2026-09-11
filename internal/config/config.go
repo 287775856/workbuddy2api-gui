@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,14 @@ type Config struct {
 	// 可写层而非宿主机目录，备份写在那里会随容器重建丢失。此时备份改写入本目录
 	// （应挂载到宿主机持久化路径）。
 	BackupDir string `json:"backup_dir"`
+
+	// CredentialsFile 面板登录凭据的持久化文件（JSON：{username,password}）。
+	//
+	// 为什么需要独立文件：config.json 在 Docker 里通常以 :ro 只读方式挂载，
+	// 无法从网页改密码后写回。此文件放在可写、持久化的挂载目录（如 /data），
+	// 修改密码时写这里，重启后生效且不被 config.json 覆盖。
+	// 为空 = 不改密码持久化能力（仍可用环境变量 WBGUI_PASSWORD 控制）。
+	CredentialsFile string `json:"credentials_file"`
 
 	// DockerContainer 网关容器名；「系统」页的重启操作用它执行 docker restart。
 	// 留空 = 关闭重启能力。
@@ -84,6 +93,7 @@ func Default() *Config {
 		UpstreamAuthDir:      base + "/auths",
 		UpstreamConfigFile:   base + "/config.json",
 		BackupDir:            "./data/backups",
+		CredentialsFile:      "",
 		DockerContainer:      "workbuddy2api",
 		DangerousOps:         false,
 		ReadOnly:             false,
@@ -183,6 +193,7 @@ func applyEnv(c *Config) {
 	str("WBGUI_CONFIG_FILE", &c.UpstreamConfigFile)
 	str("WBGUI_BACKUP_DIR", &c.BackupDir)
 	str("WBGUI_CONTAINER", &c.DockerContainer)
+	str("WBGUI_CREDENTIALS_FILE", &c.CredentialsFile)
 	str("WBGUI_USERNAME", &c.UI.Username)
 	str("WBGUI_PASSWORD", &c.UI.Password)
 	str("WBGUI_SESSION_TTL", &c.UI.SessionTTL)
@@ -250,4 +261,68 @@ func (c *Config) ReadOnlyReason() string {
 		return "服务端已开启只读模式（read_only=true），所有写操作已禁用"
 	}
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// 面板登录凭据的运行时改写（网页改密码用）
+// ---------------------------------------------------------------------------
+
+// StoredCredentials 凭据持久化文件的格式。
+type StoredCredentials struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// LoadStoredCredentials 从凭据持久化文件读取用户名/密码（存在且合法时覆盖内存配置）。
+// 任何读取/解析失败都不报错 —— 该文件是可选的，缺失时回退 config.json / 环境变量。
+func (c *Config) LoadStoredCredentials() {
+	if c.CredentialsFile == "" {
+		return
+	}
+	raw, err := os.ReadFile(c.CredentialsFile)
+	if err != nil {
+		return
+	}
+	var sc StoredCredentials
+	if err := json.Unmarshal(raw, &sc); err != nil {
+		return
+	}
+	if sc.Username != "" {
+		c.UI.Username = sc.Username
+	}
+	if sc.Password != "" {
+		c.UI.Password = sc.Password
+	}
+}
+
+// SaveStoredCredentials 原子写回凭据文件（供网页改密码）。
+// 只写 username/password 两个字段；该文件由面板专用，不混入其他配置。
+func (c *Config) SaveStoredCredentials(username, password string) error {
+	if c.CredentialsFile == "" {
+		return fmt.Errorf("未配置凭据持久化路径（credentials_file），无法保存新密码")
+	}
+	if strings.TrimSpace(username) == "" || password == "" {
+		return fmt.Errorf("用户名和密码都不能为空")
+	}
+	sc := StoredCredentials{Username: strings.TrimSpace(username), Password: password}
+	raw, err := json.MarshalIndent(sc, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化凭据失败: %w", err)
+	}
+	raw = append(raw, '\n')
+
+	dir := filepath.Dir(c.CredentialsFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("创建凭据目录失败: %w", err)
+	}
+	// 原子写：临时文件 + rename，避免并发读读到半截。
+	tmp := c.CredentialsFile + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return fmt.Errorf("写凭据文件失败: %w", err)
+	}
+	if err := os.Rename(tmp, c.CredentialsFile); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("替换凭据文件失败: %w", err)
+	}
+	return nil
 }

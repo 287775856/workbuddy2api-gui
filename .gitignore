@@ -5,6 +5,9 @@ wbgui
 /shots/
 /.chrome-profile/
 
+# 运行时数据目录：含账号凭证、配置备份、面板登录凭据（绝不能入库）
+/data/
+
 # 前端依赖与构建产物（构建产物由 Dockerfile 生成，不入库）
 web/node_modules/
 web/dist/

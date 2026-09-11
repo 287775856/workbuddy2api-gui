@@ -8,14 +8,15 @@ import (
 	"strings"
 
 	"workbuddy2api-gui/internal/authstore"
+	"workbuddy2api-gui/internal/upstream"
 )
 
 // StartLogin 发起一次网页登录，返回含授权 URL 的会话。
-func (s *Service) StartLogin() (*LoginSession, error) {
+func (s *Service) StartLogin(region upstream.Region) (*LoginSession, error) {
 	if err := s.ensureWritable(); err != nil {
 		return nil, err
 	}
-	return s.logins.Start()
+	return s.logins.Start(region)
 }
 
 // PollLogin 轮询登录会话；一旦上游返回凭证，立即落盘并按配置重启容器。

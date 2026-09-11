@@ -40,13 +40,14 @@ const loginSessionTTL = 15 * time.Minute
 
 // LoginSession 一次设备授权登录会话。
 type LoginSession struct {
-	ID        string     `json:"id"`
-	State     string     `json:"-"` // 上游 state：不下发给前端，避免被误用
-	AuthURL   string     `json:"auth_url"`
-	Status    LoginState `json:"status"`
-	Message   string     `json:"message,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID        string          `json:"id"`
+	State     string          `json:"-"`      // 上游 state：不下发给前端，避免被误用
+	Region    upstream.Region `json:"region"` // cn | global
+	AuthURL   string          `json:"auth_url"`
+	Status    LoginState      `json:"status"`
+	Message   string          `json:"message,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 
 	// 成功后填充。
 	UID      string `json:"uid,omitempty"`
@@ -78,8 +79,8 @@ func NewLoginManager(up *upstream.Client) *LoginManager {
 }
 
 // Start 发起一次登录：申请 state 与授权 URL，返回会话快照。
-func (m *LoginManager) Start() (*LoginSession, error) {
-	state, authURL, err := m.up.StartLogin()
+func (m *LoginManager) Start(region upstream.Region) (*LoginSession, error) {
+	state, authURL, err := m.up.StartLogin(region)
 	if err != nil {
 		return nil, fmt.Errorf("申请授权失败: %w", err)
 	}
@@ -91,6 +92,7 @@ func (m *LoginManager) Start() (*LoginSession, error) {
 	sess := &LoginSession{
 		ID:        id,
 		State:     state,
+		Region:    region,
 		AuthURL:   authURL,
 		Status:    LoginPending,
 		Message:   "请在浏览器中打开授权链接并完成登录，然后点击「我已完成登录」",
@@ -132,9 +134,10 @@ func (m *LoginManager) Poll(id string) (*LoginSession, error) {
 		return out, nil
 	}
 	state := sess.State
+	region := sess.Region
 	m.mu.Unlock()
 
-	acct, err := m.up.PollLogin(state)
+	acct, err := m.up.PollLogin(region, state)
 	if err != nil {
 		m.mu.Lock()
 		sess.Status = LoginError

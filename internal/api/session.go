@@ -124,6 +124,13 @@ func (s *SessionStore) Revoke(token string) {
 	s.mu.Unlock()
 }
 
+// RevokeAll 吊销全部会话（改密码后旧会话全部失效）。
+func (s *SessionStore) RevokeAll() {
+	s.mu.Lock()
+	s.sessions = map[string]session{}
+	s.mu.Unlock()
+}
+
 // gcLocked 清理过期会话。调用方必须已持锁。
 func (s *SessionStore) gcLocked() {
 	now := time.Now()
@@ -280,6 +287,7 @@ func (s *Server) handleSessionInfo(w http.ResponseWriter, r *http.Request) {
 		"dangerous_ops":          s.cfg.DangerousOps,
 		"using_default_password": s.cfg.UsingDefaultPassword(),
 		"gateway_url":            s.cfg.GatewayURL,
+		"password_changeable":    s.cfg.CredentialsFile != "",
 	}
 	if !authed {
 		// 未登录也透露「是否仍在用默认口令」是必要的：否则用户不知道去哪改。
@@ -287,4 +295,98 @@ func (s *Server) handleSessionInfo(w http.ResponseWriter, r *http.Request) {
 		resp["username"] = ""
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// 改密码
+// ---------------------------------------------------------------------------
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+	NewUsername     string `json:"new_username"`
+}
+
+// handleChangePassword 修改面板登录口令（可选同时改用户名）。
+//
+// 安全要求：
+//  1. 必须已登录（authMiddleware 已保证）。
+//  2. 必须提供正确的当前口令（防止他人用遗留会话改密码）。
+//  3. 新口令非空；未提供新用户名则沿用现有用户名。
+//  4. 凭据持久化到 credentials_file（若配置了）供重启后生效。
+//  5. 改成功后吊销所有会话、让客户端重新登录（旧口令立即失效）。
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.CredentialsFile == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": "服务端未配置凭据持久化路径（credentials_file），无法保存新密码",
+			"code":  "not_supported",
+		})
+		return
+	}
+
+	var req changePasswordRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "请求格式错误"})
+		return
+	}
+
+	// 校验当前口令（常量时间比较）。
+	if subtle.ConstantTimeCompare([]byte(req.CurrentPassword), []byte(s.cfg.UI.Password)) != 1 {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error": "当前口令不正确",
+			"code":  "wrong_password",
+		})
+		return
+	}
+	if req.NewPassword == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "新口令不能为空"})
+		return
+	}
+	if len(req.NewPassword) < 6 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "新口令至少 6 位"})
+		return
+	}
+
+	newUsername := s.cfg.UI.Username
+	if req.NewUsername != "" {
+		newUsername = req.NewUsername
+	}
+
+	// 先落盘：持久化成功才更新内存，避免「内存改了但重启回退」的不一致。
+	if err := s.cfg.SaveStoredCredentials(newUsername, req.NewPassword); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "保存新口令失败：" + err.Error()})
+		return
+	}
+
+	// 生效：更新内存配置 + 吊销所有会话（让旧口令与旧会话都立即失效）。
+	s.cfg.UI.Username = newUsername
+	s.cfg.UI.Password = req.NewPassword
+	s.sessions.RevokeAll()
+
+	// 用新口令重新给当前请求者发一个会话（无缝续期，不必再输一次）。
+	token, ok, msg := s.sessions.Create(newUsername, req.NewPassword, s.cfg, clientSource(r))
+	if !ok {
+		// 理论上不会失败（刚校验过），失败时让前端跳登录页即可。
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":       true,
+			"username": newUsername,
+			"message":  "口令已修改，请重新登录",
+			"relogin":  true,
+			"error":    msg,
+		})
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(s.sessions.ttl.Seconds()),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"username": newUsername,
+		"message":  "口令已修改并保存，重启面板后依然生效",
+	})
 }
