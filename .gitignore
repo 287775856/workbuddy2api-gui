@@ -1,0 +1,23 @@
+# 运行时数据与本地构建产物
+wbgui
+/config.json
+/testenv/
+/shots/
+/.chrome-profile/
+
+# 前端依赖与构建产物（构建产物由 Dockerfile 生成，不入库）
+web/node_modules/
+web/dist/
+internal/webui/dist/assets/
+
+# 编辑器 / 系统
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# 测试临时产物
+.chrome-profile/
+shot.sh
+web/tsconfig.tsbuildinfo
+shots/

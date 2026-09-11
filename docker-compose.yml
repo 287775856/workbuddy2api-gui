@@ -1,0 +1,61 @@
+# WorkBuddy2API Web GUI —— 部署编排
+#
+# 前置：workbuddy2api 网关已按官方方式部署（本项目假定 /root/workbuddy2api）。
+# 本面板与网关是两个独立服务，通过 HTTP API + 磁盘文件协作。
+#
+# 启动：docker compose up -d --build
+# 访问：http://<服务器IP>:8787  （默认账号 admin / workbuddy，请尽快修改）
+
+services:
+  wbgui:
+    build:
+      context: .
+      args:
+        VERSION: "1.0.0"
+    image: workbuddy2api-gui:latest
+    container_name: workbuddy2api-gui
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      WBGUI_LISTEN: ":8787"
+      # 面板登录凭据 —— 务必修改为强口令
+      WBGUI_USERNAME: "admin"
+      WBGUI_PASSWORD: "workbuddy"
+      # 网关地址与密钥（密钥留空时会自动从挂载进来的网关 config.json 里读取）
+      # 容器内 127.0.0.1 指向面板自己，因此这里要用宿主机网关端口。
+      WBGUI_GATEWAY_URL: "http://172.17.0.1:7863"
+      # 账号凭证目录，以及网关配置文件（供「网关配置」页在线编辑）
+      WBGUI_AUTH_DIR: "/app/auths"
+      WBGUI_CONFIG_FILE: "/gateway/config.json"
+      # 配置备份目录：保存配置前会把原始 config.json 备份到这里。
+      # 必须挂到宿主机持久化路径 —— 否则单文件挂载下备份会落在容器可写层，重建即丢。
+      WBGUI_BACKUP_DIR: "/data/backups"
+      # 网关容器名：用于「系统」页查询状态与重启
+      WBGUI_CONTAINER: "workbuddy2api"
+      # 高危操作总开关：解禁「重启网关」「删除账号」「恢复配置备份」
+      # 保持 false 时这些动作在 UI 上为禁用状态（推荐先用 false 熟悉面板）
+      WBGUI_DANGEROUS_OPS: "false"
+      # 全局只读：仅监控不修改，适合给他人查看
+      WBGUI_READ_ONLY: "false"
+    ports:
+      - "8787:8787"
+    volumes:
+      # 面板自己的配置（可选）：不使用环境变量时，把面板配置放这里。
+      # 注意不要与网关的 config.json 共用同一路径 —— 两者字段不同。
+      - ./config.json:/app/config.json:ro
+      # 与网关共享账号目录：面板直接读写网关的 auths/
+      # 宿主机路径需按实际部署位置调整（官方默认 /root/workbuddy2api）
+      - /root/workbuddy2api/auths:/app/auths
+      # 网关的 config.json 挂到独立路径，仅供「网关配置」页编辑，不与面板配置混用
+      - /root/workbuddy2api/config.json:/gateway/config.json
+      # 面板数据目录（配置备份等）：挂到宿主机持久化，避免容器重建丢失
+      - ./data:/data
+      # docker.sock：用于「系统」页重启网关容器。
+      # 安全提示：挂载 docker.sock 等同于把宿主机 Docker 控制权交给该容器，
+      # 若不需要一键重启能力，可注释掉下面这行（其余功能不受影响）。
+      - /var/run/docker.sock:/var/run/docker.sock
+    # 权限说明：面板需要读写挂载进来的凭证文件与网关 config.json，
+    # 而它们通常属于宿主机 root（0600）。为免去逐文件改权限，这里以 root 运行。
+    # 更严格的部署可改为 user: "10001:10001"，并把宿主机 auths/ 目录与
+    # config.json 的属主改为 10001（同时放弃 docker.sock 控制能力）。
+    user: "0:0"

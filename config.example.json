@@ -1,0 +1,18 @@
+{
+  "listen": ":8787",
+  "gateway_url": "http://127.0.0.1:7863",
+  "gateway_api_key": "",
+  "auth_dir": "/root/workbuddy2api/auths",
+  "config_file": "/root/workbuddy2api/config.json",
+  "backup_dir": "./data/backups",
+  "docker_container": "workbuddy2api",
+  "dangerous_ops": false,
+  "read_only": false,
+  "refresh_config_on_login": true,
+  "timeout_seconds": 120,
+  "ui": {
+    "username": "admin",
+    "password": "workbuddy",
+    "session_ttl": "12h"
+  }
+}
