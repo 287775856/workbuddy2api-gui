@@ -11,7 +11,7 @@ services:
     build:
       context: .
       args:
-        VERSION: "1.0.0"
+        VERSION: "1.2.1"
     image: workbuddy2api-gui:latest
     container_name: workbuddy2api-gui
     restart: unless-stopped
@@ -27,9 +27,18 @@ services:
       # 账号凭证目录，以及网关配置文件（供「网关配置」页在线编辑）
       WBGUI_AUTH_DIR: "/app/auths"
       WBGUI_CONFIG_FILE: "/gateway/config.json"
+      # 凭证文件属主：面板以 root 写入，网关容器以 uid 10001（app）读取。
+      # 若不设置，面板写出的凭证是 root:0600，网关读不到 →
+      # 表现为「账号已添加但池中显示未加载」，且重启网关也无效。
+      # 10001 是官方网关镜像的运行用户；若你改了网关镜像或 user:，请填实际值：
+      #   docker inspect <网关容器> --format '{{.Config.User}}'
+      WBGUI_AUTH_OWNER_UID: "10001"
+      WBGUI_AUTH_OWNER_GID: "10001"
       # 配置备份目录：保存配置前会把原始 config.json 备份到这里。
       # 必须挂到宿主机持久化路径 —— 否则单文件挂载下备份会落在容器可写层，重建即丢。
       WBGUI_BACKUP_DIR: "/data/backups"
+      # 面板登录凭据的持久化文件：网页「修改密码」需要它（config.json 通常是只读挂载）。
+      WBGUI_CREDENTIALS_FILE: "/data/credentials.json"
       # 网关容器名：用于「系统」页查询状态与重启
       WBGUI_CONTAINER: "workbuddy2api"
       # 高危操作总开关：解禁「重启网关」「删除账号」「恢复配置备份」
