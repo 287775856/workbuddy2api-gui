@@ -30,6 +30,15 @@ type Config struct {
 	// UpstreamAuthDir 网关账号凭证目录（./auths），GUI 在此直读/落盘 workbuddy-*.json。
 	UpstreamAuthDir string `json:"auth_dir"`
 
+	// AuthOwnerUID/AuthOwnerGID 落盘凭证文件后把属主改成该值（-1 = 不改）。
+	//
+	// 为什么需要：面板常以 root 运行（写宿主机挂载的凭证目录），而网关容器以
+	// 低权限用户读取（官方镜像里是 uid 10001 的 app）。若凭证是 root:0600，
+	// 网关读不到 → 表现为「账号已添加，但池中显示未加载」，必须手工 chown 才能用。
+	// 默认 -1/-1（不改，兼容非 Docker 场景）；容器部署建议设为网关容器的运行用户。
+	AuthOwnerUID int `json:"auth_owner_uid"`
+	AuthOwnerGID int `json:"auth_owner_gid"`
+
 	// UpstreamConfigFile 网关配置文件（config.json），供「配置」页在线读写。
 	UpstreamConfigFile string `json:"config_file"`
 
@@ -91,6 +100,8 @@ func Default() *Config {
 		GatewayURL:           "http://127.0.0.1:7863",
 		GatewayAPIKey:        "",
 		UpstreamAuthDir:      base + "/auths",
+		AuthOwnerUID:         -1,
+		AuthOwnerGID:         -1,
 		UpstreamConfigFile:   base + "/config.json",
 		BackupDir:            "./data/backups",
 		CredentialsFile:      "",
@@ -194,6 +205,16 @@ func applyEnv(c *Config) {
 	str("WBGUI_BACKUP_DIR", &c.BackupDir)
 	str("WBGUI_CONTAINER", &c.DockerContainer)
 	str("WBGUI_CREDENTIALS_FILE", &c.CredentialsFile)
+	if v := os.Getenv("WBGUI_AUTH_OWNER_UID"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.AuthOwnerUID = n
+		}
+	}
+	if v := os.Getenv("WBGUI_AUTH_OWNER_GID"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.AuthOwnerGID = n
+		}
+	}
 	str("WBGUI_USERNAME", &c.UI.Username)
 	str("WBGUI_PASSWORD", &c.UI.Password)
 	str("WBGUI_SESSION_TTL", &c.UI.SessionTTL)

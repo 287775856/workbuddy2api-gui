@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"workbuddy2api-gui/internal/authstore"
@@ -331,8 +332,16 @@ func (s *Service) Overview(ctx context.Context) *Overview {
 				fmt.Sprintf("账号 %s 在网关池中但磁盘无凭证文件，重启后将消失", shortUID(a.UID)))
 		}
 		if a.HasFile && !a.InGateway && status != nil {
-			ov.Warnings = append(ov.Warnings,
-				fmt.Sprintf("账号 %s 有凭证文件但不在网关池中，需重启网关加载", shortUID(a.UID)))
+			// 区分两种成因，给出可操作的指引：
+			//  ① 凭证文件权限让网关读不到（容器里面板 root 写、网关低权限用户读）
+			//     —— 这种情况单纯重启网关也没用，必须先修权限。
+			//  ② 权限正常，只是网关还没重启扫描到新文件。
+			if hint := s.credentialReadabilityHint(a.UID); hint != "" {
+				ov.Warnings = append(ov.Warnings, fmt.Sprintf("账号 %s 已落盘但网关无法读取：%s", shortUID(a.UID), hint))
+			} else {
+				ov.Warnings = append(ov.Warnings,
+					fmt.Sprintf("账号 %s 有凭证文件但不在网关池中，需重启网关加载", shortUID(a.UID)))
+			}
 		}
 		// 积分汇总口径：主动查询结果优先，其次用网关 /status 里缓存的积分。
 		// 两者都没有（例如凭证文件存在但网关未加载该账号）才算「未取到」，据实计入 failed。
@@ -778,6 +787,41 @@ type StateFileInfo struct {
 	ModTime  time.Time `json:"mod_time,omitempty"`
 	Accounts int       `json:"accounts"`
 	Err      string    `json:"error,omitempty"`
+}
+
+// credentialReadabilityHint 检查凭证文件是否「对其他用户不可读」。
+//
+// 场景：面板以 root 运行（写宿主机挂载的凭证目录），网关容器以低权限用户
+// （官方镜像里是 uid 10001 的 app）读取同一目录。若凭证是 root:600，网关
+// open() 会 permission denied，账号永远加载不进池 —— 此时只提示「重启网关」
+// 会误导用户（重启也没用）。这里检出该情况并给出具体修法。
+//
+// 返回空串表示权限没问题（那么「未加载」的原因就只剩「网关还没重启」）。
+func (s *Service) credentialReadabilityHint(uid string) string {
+	p := s.store.PathFor(uid)
+	if p == "" {
+		return ""
+	}
+	st, err := os.Stat(p)
+	if err != nil {
+		return ""
+	}
+	mode := st.Mode().Perm()
+	// 组/其他用户可读 → 网关（不同用户）也能读，无权限问题。
+	if mode&0o044 != 0 {
+		return ""
+	}
+	uid2, gid := s.store.Owner()
+	if fi, ok := st.Sys().(*syscall.Stat_t); ok {
+		ownerLine := fmt.Sprintf("当前属主 %d:%d 权限 %o", fi.Uid, fi.Gid, mode)
+		fix := fmt.Sprintf("执行 chown %d:%d %s（或设置配置项 auth_owner_uid/auth_owner_gid）",
+			fi.Uid, fi.Gid, "auths/workbuddy-"+shortUID(uid)+".json")
+		if uid2 >= 0 || gid >= 0 {
+			fix = fmt.Sprintf("面板已配置 auth_owner_uid=%d，但本次写入未生效，请检查挂载目录权限", uid2)
+		}
+		return ownerLine + "，网关以其他用户运行故读不到；" + fix
+	}
+	return fmt.Sprintf("文件权限 %o 可能过于严格，网关进程读不到", mode)
 }
 
 func shortUID(uid string) string {

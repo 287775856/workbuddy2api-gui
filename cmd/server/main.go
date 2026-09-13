@@ -50,6 +50,12 @@ func main() {
 	if err := os.MkdirAll(store.Dir(), 0o700); err != nil {
 		log.Printf("警告：创建凭证目录 %s 失败: %v", store.Dir(), err)
 	}
+	// 凭证文件属主：容器部署时设成网关容器的运行用户，否则网关读不到面板写入的账号
+	// （表现为「账号已添加但池中未加载」）。
+	if cfg.AuthOwnerUID >= 0 || cfg.AuthOwnerGID >= 0 {
+		store.SetOwner(cfg.AuthOwnerUID, cfg.AuthOwnerGID)
+		log.Printf("凭证文件属主将设为 %d:%d（供网关容器读取）", cfg.AuthOwnerUID, cfg.AuthOwnerGID)
+	}
 
 	// 网关 api_key：未显式配置时从上游 config.json 自动读取（单机部署零配置体验）。
 	if cfg.GatewayAPIKey == "" {

@@ -67,6 +67,15 @@ func ValidUID(uid string) bool {
 type Store struct {
 	dir string
 	mu  sync.Mutex
+
+	// ownerUID/ownerGID 落盘后把凭证文件属主改成该 uid/gid（-1 = 不改）。
+	//
+	// 为什么需要：面板常以 root 运行（要写宿主机挂载的凭证目录），而网关容器
+	// 以低权限用户（如 uid 10001 app）读取同一目录。若文件是 root:0600，网关
+	// 读不到 → 表现为「账号已添加但池中未加载」。让面板写完后 chown 成网关用户
+	// 即可根治，避免用户每次手工 chown。
+	ownerUID int
+	ownerGID int
 }
 
 // New 构建 Store；dir 为空时报错（凭证目录是必需配置）。
@@ -78,11 +87,37 @@ func New(dir string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("解析凭证目录: %w", err)
 	}
-	return &Store{dir: abs}, nil
+	// 默认不改属主（-1/-1）。
+	return &Store{dir: abs, ownerUID: -1, ownerGID: -1}, nil
+}
+
+// SetOwner 设置落盘后凭证文件的属主（uid/gid 为 -1 表示不改）。
+// 用于让网关容器（通常以低权限用户运行）能读到面板写入的凭证。
+func (s *Store) SetOwner(uid, gid int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ownerUID = uid
+	s.ownerGID = gid
+}
+
+// Owner 返回当前配置的属主（-1 表示不改）。
+func (s *Store) Owner() (uid, gid int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ownerUID, s.ownerGID
 }
 
 // Dir 返回凭证目录绝对路径。
 func (s *Store) Dir() string { return s.dir }
+
+// PathFor 返回 uid 对应的凭证文件绝对路径；uid 非法时返回空串。
+func (s *Store) PathFor(uid string) string {
+	p, err := s.pathFor(uid)
+	if err != nil {
+		return ""
+	}
+	return p
+}
 
 // pathFor 返回 uid 对应的凭证文件绝对路径（已校验 uid，无穿越风险）。
 func (s *Store) pathFor(uid string) (string, error) {
@@ -226,6 +261,7 @@ func (s *Store) Save(a *Account) error {
 
 // writeAtomic 原子替换（tmp + rename）；在 Docker 单文件挂载等无法 rename 的场景
 // 自动回退为原地写入，避免"凭证刷新成功却存不下去"。
+// 写入后按 SetOwner 配置调整属主，让网关容器（低权限用户）能读到。
 // 调用方必须已持有 s.mu。
 func (s *Store) writeAtomic(path string, raw []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -233,6 +269,25 @@ func (s *Store) writeAtomic(path string, raw []byte) error {
 	}
 	if _, err := fsutil.WriteFileAtomic(path, raw, 0o600); err != nil {
 		return err
+	}
+	// 属主调整：仅当显式配置过（>=0）才生效。
+	// 失败不视为写凭证失败（凭证内容已落盘），但必须让调用方能感知——
+	// 因此返回错误，由上层决定是否降级为告警。
+	if s.ownerUID >= 0 || s.ownerGID >= 0 {
+		uid, gid := s.ownerUID, s.ownerGID
+		if uid < 0 {
+			uid = -1
+		}
+		if gid < 0 {
+			gid = -1
+		}
+		if err := os.Chown(path, uid, gid); err != nil {
+			return fmt.Errorf("凭证已写入，但调整文件属主为 %d:%d 失败（网关可能读不到该账号）: %w", uid, gid, err)
+		}
+		// 目录也要可进入：网关需要 stat/open 该目录下的文件。
+		if err := os.Chmod(filepath.Dir(path), 0o755); err != nil {
+			return fmt.Errorf("凭证已写入，但调整目录权限失败: %w", err)
+		}
 	}
 	return nil
 }
