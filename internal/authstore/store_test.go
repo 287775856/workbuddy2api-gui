@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"workbuddy2api-gui/internal/fsutil"
 )
 
 // TestParseNested 插件 OAuth 的嵌套格式。
@@ -115,8 +117,10 @@ func TestSaveAndGetRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := st.Mode().Perm(); perm != 0o600 {
-		t.Errorf("凭证文件权限 = %o, want 600", perm)
+	if fsutil.PermBitsEnforced() {
+		if perm := st.Mode().Perm(); perm != 0o600 {
+			t.Errorf("凭证文件权限 = %o, want 600", perm)
+		}
 	}
 
 	// 文件名格式需与网关的扫描规则（workbuddy*.json）一致。

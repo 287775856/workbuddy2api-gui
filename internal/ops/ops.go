@@ -10,11 +10,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"workbuddy2api-gui/internal/authstore"
 	"workbuddy2api-gui/internal/config"
+	"workbuddy2api-gui/internal/fsutil"
 	"workbuddy2api-gui/internal/gateway"
 	"workbuddy2api-gui/internal/upstream"
 )
@@ -815,10 +815,10 @@ func (s *Service) credentialReadabilityHint(uid string) string {
 		return ""
 	}
 	uid2, gid := s.store.Owner()
-	if fi, ok := st.Sys().(*syscall.Stat_t); ok {
-		ownerLine := fmt.Sprintf("当前属主 %d:%d 权限 %o", fi.Uid, fi.Gid, mode)
+	if fuid, fgid, ok := fsutil.FileOwner(st); ok {
+		ownerLine := fmt.Sprintf("当前属主 %d:%d 权限 %o", fuid, fgid, mode)
 		fix := fmt.Sprintf("执行 chown %d:%d %s（或设置配置项 auth_owner_uid/auth_owner_gid）",
-			fi.Uid, fi.Gid, "auths/workbuddy-"+shortUID(uid)+".json")
+			fuid, fgid, "auths/workbuddy-"+shortUID(uid)+".json")
 		if uid2 >= 0 || gid >= 0 {
 			fix = fmt.Sprintf("面板已配置 auth_owner_uid=%d，但本次写入未生效，请检查挂载目录权限", uid2)
 		}

@@ -61,6 +61,9 @@ func TestWriteFileAtomicPermission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !PermBitsEnforced() {
+		t.Skip("非 Unix 系统：权限由 ACL 而非 mode 位控制")
+	}
 	if perm := st.Mode().Perm(); perm != 0o600 {
 		t.Errorf("权限 = %o, want 600", perm)
 	}

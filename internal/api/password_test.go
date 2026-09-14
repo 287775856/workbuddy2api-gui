@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"workbuddy2api-gui/internal/config"
+	"workbuddy2api-gui/internal/fsutil"
 )
 
 // newTestServer 构造一个带临时凭据文件的 Server，用于改密码端点的测试。
@@ -189,7 +190,9 @@ func TestCredentialFilePermission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("凭据文件应存在: %v", err)
 	}
-	if perm := st.Mode().Perm(); perm != 0o600 {
-		t.Errorf("凭据文件权限 = %o, want 600", perm)
+	if fsutil.PermBitsEnforced() {
+		if perm := st.Mode().Perm(); perm != 0o600 {
+			t.Errorf("凭据文件权限 = %o, want 600", perm)
+		}
 	}
 }

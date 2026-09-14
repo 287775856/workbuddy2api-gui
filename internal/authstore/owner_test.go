@@ -2,8 +2,9 @@ package authstore
 
 import (
 	"os"
-	"syscall"
 	"testing"
+
+	"workbuddy2api-gui/internal/fsutil"
 )
 
 // TestSetOwnerApplies 落盘后应把凭证文件属主改成配置的 uid/gid。
@@ -32,12 +33,12 @@ func TestSetOwnerApplies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sys, ok := st.Sys().(*syscall.Stat_t)
+	fuid, fgid, ok := fsutil.FileOwner(st)
 	if !ok {
 		t.Skip("非 Unix 系统")
 	}
-	if int(sys.Uid) != uid || int(sys.Gid) != gid {
-		t.Errorf("属主 = %d:%d, want %d:%d", sys.Uid, sys.Gid, uid, gid)
+	if fuid != uid || fgid != gid {
+		t.Errorf("属主 = %d:%d, want %d:%d", fuid, fgid, uid, gid)
 	}
 	// 目录需可进入，否则网关无法 open 其中的文件。
 	dst, err := os.Stat(dir)
@@ -69,12 +70,12 @@ func TestOwnerDefaultDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sys, ok := st.Sys().(*syscall.Stat_t)
+	fuid, _, ok := fsutil.FileOwner(st)
 	if !ok {
 		t.Skip("非 Unix 系统")
 	}
-	if int(sys.Uid) != os.Geteuid() {
-		t.Errorf("未配置时不应改属主: got %d, want %d", sys.Uid, os.Geteuid())
+	if fuid != os.Geteuid() {
+		t.Errorf("未配置时不应改属主: got %d, want %d", fuid, os.Geteuid())
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"workbuddy2api-gui/internal/fsutil"
@@ -187,13 +186,13 @@ func sameDevice(path, dir string) bool {
 	if err != nil {
 		return false
 	}
-	fs, ok1 := fi.Sys().(*syscall.Stat_t)
-	ds, ok2 := di.Sys().(*syscall.Stat_t)
+	fsDev, ok1 := fsutil.DeviceID(fi)
+	dsDev, ok2 := fsutil.DeviceID(di)
 	if !ok1 || !ok2 {
 		// 非 Unix：无法判断设备，按"同目录可写"处理。
 		return true
 	}
-	return fs.Dev == ds.Dev
+	return fsDev == dsDev
 }
 
 // ResetUpstreamConfig 从备份恢复网关 config.json（高危：需 dangerous_ops）。
