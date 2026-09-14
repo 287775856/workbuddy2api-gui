@@ -10,7 +10,7 @@ import type {
   OpResult,
   Overview,
   SessionInfo,
-  Stats,
+  StatsResponse,
   SystemInfo,
   TaskListResponse,
   TaskView,
@@ -119,9 +119,21 @@ export const api = {
 
   // 模型 / 聊天
   models: () => get<ModelsResponse>('/api/models'),
-  // 请求统计（按模型聚合）
-  stats: () => get<Stats>('/api/stats'),
+  // 请求统计（按模型聚合）+ 官方价换算
+  stats: (mode?: 'peak' | 'offpeak') =>
+    get<StatsResponse>(`/api/stats${mode ? `?mode=${mode}` : ''}`),
   resetStats: () => post<{ ok: boolean; message: string }>('/api/stats/reset'),
+  // 官方价格表编辑
+  savePrice: (p: {
+    model: string
+    cached_input: number
+    miss_input: number
+    output: number
+    off_peak_ratio?: number
+    note?: string
+  }) => put<{ ok: boolean; message: string }>('/api/pricing', p),
+  deletePrice: (model: string) =>
+    del<{ ok: boolean; message: string }>(`/api/pricing/${encodeURIComponent(model)}`),
   chat: (payload: { model: string; messages: ChatMessage[]; extra?: Record<string, unknown>; conversationId?: string }) =>
     post<{ result: import('./types').ChatResult; elapsed_ms: number }>(
       '/api/chat',

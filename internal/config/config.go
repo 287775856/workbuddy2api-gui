@@ -57,6 +57,13 @@ type Config struct {
 	// 为空 = 不改密码持久化能力（仍可用环境变量 WBGUI_PASSWORD 控制）。
 	CredentialsFile string `json:"credentials_file"`
 
+	// PricingFile 官方价格表持久化文件（模型 → 单价，元/百万 token）。
+	//
+	// 用于在「请求统计」页把 token 用量换算成"走官方 API 要花多少钱"。
+	// 内置 DeepSeek 官方价；其余厂商定价页为 JS 渲染无法可靠抓取，故留空由用户填。
+	// 默认为空：不配置则只读内置默认值，用户编辑无法保存。
+	PricingFile string `json:"pricing_file"`
+
 	// DockerContainer 网关容器名；「系统」页的重启操作用它执行 docker restart。
 	// 留空 = 关闭重启能力。
 	DockerContainer string `json:"docker_container"`
@@ -205,6 +212,7 @@ func applyEnv(c *Config) {
 	str("WBGUI_BACKUP_DIR", &c.BackupDir)
 	str("WBGUI_CONTAINER", &c.DockerContainer)
 	str("WBGUI_CREDENTIALS_FILE", &c.CredentialsFile)
+	str("WBGUI_PRICING_FILE", &c.PricingFile)
 	if v := os.Getenv("WBGUI_AUTH_OWNER_UID"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			c.AuthOwnerUID = n

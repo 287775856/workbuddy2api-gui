@@ -306,3 +306,50 @@ export interface Stats {
   total: ModelStat
   models: ModelStat[] | null
 }
+
+/** 单个模型的官方单价（元/百万 token）。 */
+export interface ModelPrice {
+  /** 缓存命中输入单价 */
+  cached_input: number
+  /** 缓存未命中输入单价 */
+  miss_input: number
+  /** 输出单价 */
+  output: number
+  /** 空闲时段价倍数（如 0.5）；0/1 = 不区分时段 */
+  off_peak_ratio?: number
+  note?: string
+}
+
+/** 单模型的官方价换算结果。 */
+export interface ModelCost {
+  model: string
+  priced: boolean
+  note?: string
+  cached_input_cost: number
+  miss_input_cost: number
+  output_cost: number
+  total: number
+  cached_input_tokens: number
+  miss_input_tokens: number
+  output_tokens: number
+}
+
+/** 价格表元信息。 */
+export interface PricingTable {
+  models: Record<string, ModelPrice> | null
+  source?: string
+  updated_at?: string
+  /** 服务端是否可保存编辑（配置了 pricing_file） */
+  editable: boolean
+}
+
+/** /api/stats 的完整响应（统计 + 官方价换算）。 */
+export interface StatsResponse {
+  stats: Stats
+  mode: 'peak' | 'offpeak'
+  costs: Record<string, ModelCost> | null
+  total: ModelCost
+  priced: string[] | null
+  unpriced: string[] | null
+  pricing: PricingTable
+}
