@@ -6,6 +6,7 @@ import type { SessionInfo } from './types'
 import { Alert, Spinner } from './ui'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import StatsPage from './pages/StatsPage'
 import Accounts from './pages/Accounts'
 import LoginWizard from './pages/LoginWizard'
 import Playground from './pages/Playground'
@@ -15,6 +16,7 @@ import System from './pages/System'
 const NAV = [
   { to: '/', label: '仪表盘', icon: '📊', end: true },
   { to: '/accounts', label: '账号管理', icon: '👥' },
+  { to: '/stats', label: '请求统计', icon: '📈' },
   { to: '/login', label: '添加账号', icon: '➕' },
   { to: '/playground', label: '聊天测试', icon: '💬' },
   { to: '/config', label: '网关配置', icon: '⚙️' },
@@ -140,6 +142,7 @@ function Shell({
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/accounts" element={<Accounts session={session} />} />
+          <Route path="/stats" element={<StatsPage session={session} />} />
           <Route path="/login" element={<LoginWizard session={session} onDone={onSessionRefresh} />} />
           <Route path="/playground" element={<Playground />} />
           <Route path="/config" element={<ConfigPage session={session} />} />

@@ -269,3 +269,40 @@ export interface ChatDelta {
   elapsed_ms?: number
   ttfb_ms?: number
 }
+
+/** 单个模型的派生统计（对应网关 /v1/stats 的 models[]）。 */
+export interface ModelStat {
+  model: string
+  requests: number
+  success: number
+  failed: number
+  streaming: number
+  /** 平均首字延迟（毫秒） */
+  avg_ttfb_ms: number
+  /** 平均端到端耗时（毫秒） */
+  avg_latency_ms: number
+  /** 生成吞吐（输出 token / 秒） */
+  tokens_per_sec: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  cache_hit_tokens: number
+  cache_miss_tokens: number
+  cache_write_tokens: number
+  /** 缓存命中率 0~1 */
+  cache_hit_rate: number
+  credit: number
+  credit_per_req: number
+  last_seen?: string
+}
+
+/** 网关 /v1/stats 响应。 */
+export interface Stats {
+  enabled: boolean
+  message?: string
+  since: string
+  now: string
+  uptime_sec: number
+  total: ModelStat
+  models: ModelStat[] | null
+}

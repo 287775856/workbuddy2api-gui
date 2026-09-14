@@ -171,6 +171,9 @@ func (s *Service) Upstream() *upstream.Client { return s.up }
 // Store 返回凭证存储。
 func (s *Service) Store() *authstore.Store { return s.store }
 
+// EnsureWritable 写操作前置校验（导出供 API 层复用）。
+func (s *Service) EnsureWritable() error { return s.ensureWritable() }
+
 // ensureWritable 写操作前置校验。
 func (s *Service) ensureWritable() error {
 	if s.cfg.ReadOnly {

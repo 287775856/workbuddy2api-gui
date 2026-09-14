@@ -76,6 +76,9 @@ func (s *Server) Handler() http.Handler {
 
 	// ── 模型 / 聊天测试台 ─────────────────────────────────
 	mux.HandleFunc("GET /api/models", s.handleModels)
+	// ── 请求统计（按模型聚合，数据源为网关 /v1/stats）─────
+	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("POST /api/stats/reset", s.handleStatsReset)
 	mux.HandleFunc("POST /api/chat", s.handleChat)
 	mux.HandleFunc("POST /api/chat/stream", s.handleChatStream)
 
@@ -355,6 +358,29 @@ func (s *Server) handleLoginCancel(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 // 模型 / 聊天
 // ---------------------------------------------------------------------------
+
+// handleStats 透传网关的按模型统计。
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	st, err := s.svc.Gateway().Stats(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// handleStatsReset 重置网关统计（写操作，受只读模式约束）。
+func (s *Server) handleStatsReset(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.EnsureWritable(); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.svc.Gateway().ResetStats(r.Context()); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "网关统计已重置"})
+}
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	models, err := s.svc.Gateway().Models(r.Context())

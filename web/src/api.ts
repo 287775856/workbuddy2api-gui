@@ -10,6 +10,7 @@ import type {
   OpResult,
   Overview,
   SessionInfo,
+  Stats,
   SystemInfo,
   TaskListResponse,
   TaskView,
@@ -118,6 +119,9 @@ export const api = {
 
   // 模型 / 聊天
   models: () => get<ModelsResponse>('/api/models'),
+  // 请求统计（按模型聚合）
+  stats: () => get<Stats>('/api/stats'),
+  resetStats: () => post<{ ok: boolean; message: string }>('/api/stats/reset'),
   chat: (payload: { model: string; messages: ChatMessage[]; extra?: Record<string, unknown>; conversationId?: string }) =>
     post<{ result: import('./types').ChatResult; elapsed_ms: number }>(
       '/api/chat',

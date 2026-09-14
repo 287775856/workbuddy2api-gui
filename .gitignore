@@ -24,3 +24,7 @@ internal/webui/dist/assets/
 shot.sh
 web/tsconfig.tsbuildinfo
 shots/
+
+# 浏览器测试截图
+shots-stats.png
+shots/

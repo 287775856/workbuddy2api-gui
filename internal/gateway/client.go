@@ -364,3 +364,84 @@ func truncate(s string, n int) string {
 	}
 	return s
 }
+
+// ---------------------------------------------------------------------------
+// 请求统计（/v1/stats）
+// ---------------------------------------------------------------------------
+
+// ModelStat 单个模型的派生统计（与网关 metrics.Derived 对应）。
+type ModelStat struct {
+	Model string `json:"model"`
+
+	Requests  int64 `json:"requests"`
+	Success   int64 `json:"success"`
+	Failed    int64 `json:"failed"`
+	Streaming int64 `json:"streaming"`
+
+	// AvgTTFBMS 平均首字延迟（毫秒）。
+	AvgTTFBMS float64 `json:"avg_ttfb_ms"`
+	// AvgLatencyMS 平均端到端耗时（毫秒）。
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	// TokensPerSec 生成吞吐（输出 token / 生成秒数）。
+	TokensPerSec float64 `json:"tokens_per_sec"`
+
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+
+	CacheHitTokens   int64   `json:"cache_hit_tokens"`
+	CacheMissTokens  int64   `json:"cache_miss_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	CacheHitRate     float64 `json:"cache_hit_rate"`
+
+	Credit       float64 `json:"credit"`
+	CreditPerReq float64 `json:"credit_per_req"`
+
+	LastSeen *time.Time `json:"last_seen,omitempty"`
+}
+
+// Stats 网关 /v1/stats 响应。
+type Stats struct {
+	Enabled   bool        `json:"enabled"`
+	Message   string      `json:"message,omitempty"`
+	Since     time.Time   `json:"since"`
+	Now       time.Time   `json:"now"`
+	UptimeSec int64       `json:"uptime_sec"`
+	Total     ModelStat   `json:"total"`
+	Models    []ModelStat `json:"models"`
+}
+
+// Stats 拉取按模型聚合的请求统计。
+func (c *Client) Stats(ctx context.Context) (*Stats, error) {
+	resp, err := c.do(ctx, http.MethodGet, "/v1/stats", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("网关拒绝鉴权（401）：请检查 api_key 是否正确")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("网关 /v1/stats 返回 HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200))
+	}
+	var out Stats
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("解析统计失败: %w", err)
+	}
+	return &out, nil
+}
+
+// ResetStats 重置网关统计（清空累计，便于观察增量）。
+func (c *Client) ResetStats(ctx context.Context) error {
+	resp, err := c.do(ctx, http.MethodPost, "/v1/stats/reset", []byte("{}"))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("重置统计失败（HTTP %d）: %s", resp.StatusCode, truncate(string(raw), 200))
+	}
+	return nil
+}
