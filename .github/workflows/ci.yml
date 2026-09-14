@@ -27,9 +27,9 @@ jobs:
     name: 前端构建
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: npm
@@ -57,14 +57,16 @@ jobs:
     name: Go 测试与跨平台编译
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 前端产物已 embed 进仓库占位，Go 侧不依赖 node；直接编译即可。
-      # 本仓库零第三方依赖（go.mod 只有 module/go 两行、无 go.sum），
-      # 因此不开 setup-go 的 cache —— 它会因找不到 go.sum 而告警。
-      - uses: actions/setup-go@v5
+      # 本仓库零第三方依赖（go.mod 只有 module/go 两行、无 go.sum）。
+      # 注意：setup-go 的 cache 默认是 true，必须显式关掉 —— 否则它会去找
+      # go.sum 并报 "Restore cache failed: Dependencies file is not found"。
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.22'
+          cache: false
 
       - name: go vet
         run: go vet ./...
