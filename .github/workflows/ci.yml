@@ -1,0 +1,95 @@
+# ci.yml 面板的构建与测试门禁。
+#
+# 为什么需要：仓库此前没有任何 CI，跨平台回归只能靠人肉发现 ——
+# 例如 internal/ops 曾直接引用 syscall.Stat_t（Windows 无此类型），
+# 导致 GOOS=windows 下整个项目编译失败，直到有人在 Windows 上手动构建才暴露。
+# 注意 darwin 也属于 unix、带 Stat_t，因此跨平台检查必须显式覆盖 Windows。
+#
+# 触发：push / PR 到 master，及手动触发。
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+  pull_request:
+    branches: [master]
+    paths-ignore: ['**/*.md', 'LICENSE', '.gitignore']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # 前端与 Go 二进制是一体的（Vite 产物 embed 进 Go），所以前端单独一道门禁：
+  # tsc 校验类型、vite 产出资源，二者任一失败都说明产物不可用。
+  web:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # 用 ci 而非 install：锁文件与 package.json 不一致时直接失败，
+      # 避免"本地能装、CI 装出另一套依赖"的漂移。
+      - name: 安装依赖
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+
+      - name: 类型检查 + 构建
+        working-directory: web
+        run: npm run build
+
+      - name: 确认产物已生成
+        run: |
+          test -f internal/webui/dist/index.html || { echo "缺少 index.html"; exit 1; }
+          ls -1 internal/webui/dist/assets | head
+
+  # Go 侧：先在本机平台跑测试，再做跨平台编译。
+  # 跨平台只 build/vet 不 test —— 交叉编译无法执行测试二进制；
+  # vet 会连同测试文件一起类型检查，正是检出 Stat_t 这类问题的关键。
+  go:
+    name: Go 测试与跨平台编译
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 前端产物已 embed 进仓库占位，Go 侧不依赖 node；直接编译即可。
+      # 本仓库零第三方依赖（go.mod 只有 module/go 两行、无 go.sum），
+      # 因此不开 setup-go 的 cache —— 它会因找不到 go.sum 而告警。
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -count=1 ./...
+
+      - name: 构建（本机）
+        run: go build -trimpath ./...
+
+      # 矩阵覆盖 Windows 是重点：它是 Stat_t / 权限位这类问题的唯一暴露面。
+      - name: 跨平台编译与类型检查
+        run: |
+          set -e
+          for target in windows/amd64 linux/amd64 linux/arm64 darwin/arm64; do
+            os="${target%%/*}"; arch="${target##*/}"
+            echo "::group::$target"
+            GOOS="$os" GOARCH="$arch" go build ./...
+            GOOS="$os" GOARCH="$arch" go vet ./...
+            echo "::endgroup::"
+          done
+
+      - name: 交叉编译单文件二进制作冒烟验证
+        run: |
+          set -e
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/wbgui.exe ./cmd/server
+          GOOS=linux  GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/wbgui     ./cmd/server
+          ls -lh /tmp/wbgui.exe /tmp/wbgui
