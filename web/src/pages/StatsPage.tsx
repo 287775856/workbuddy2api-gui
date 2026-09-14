@@ -107,8 +107,11 @@ export default function StatsPage({ session }: { session: SessionInfo }) {
 
   if (loading && !stats) return <Spinner label="正在加载统计…" />
 
-  // 统计未启用（服务端 metrics_enabled=false）。
+  // 统计不可用：两种成因表现不同，提示也要区别 ——
+  //   1) 网关有该端点但关了开关（metrics_enabled=false），提示去配置里打开；
+  //   2) 网关根本没有该端点（官方上游版本），提示换用配套网关，别让人去翻配置。
   if (stats && !stats.enabled) {
+    const noEndpoint = stats.message?.includes('/v1/stats') ?? false
     return (
       <>
         <div className="page-head">
@@ -118,8 +121,13 @@ export default function StatsPage({ session }: { session: SessionInfo }) {
           </div>
         </div>
         <Alert kind="warn">
-          <strong>网关未启用统计。</strong>
-          <div style={{ marginTop: 4 }}>{stats.message || '请在网关配置中设置 server.metrics_enabled=true'}</div>
+          <strong>{noEndpoint ? '当前网关不支持请求统计。' : '网关未启用统计。'}</strong>
+          <div style={{ marginTop: 4 }}>
+            {stats.message ||
+              (noEndpoint
+                ? '本页需要网关提供 /v1/stats 端点，官方上游版本暂未包含。面板其余功能不受影响。'
+                : '请在网关配置中设置 server.metrics_enabled=true')}
+          </div>
         </Alert>
       </>
     )

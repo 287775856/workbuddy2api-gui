@@ -412,6 +412,10 @@ type Stats struct {
 }
 
 // Stats 拉取按模型聚合的请求统计。
+//
+// 404 特判：/v1/stats 是本面板配套的网关扩展端点，官方上游（Sliverkiss）版本
+// 并不提供。此时返回 Enabled=false 而不是错误——前端 !enabled 分支已有友好提示，
+// 硬报 "HTTP 404" 会让人误以为是面板或链路坏了。鉴权失败（401）等仍按错误返回。
 func (c *Client) Stats(ctx context.Context) (*Stats, error) {
 	resp, err := c.do(ctx, http.MethodGet, "/v1/stats", nil)
 	if err != nil {
@@ -421,6 +425,13 @@ func (c *Client) Stats(ctx context.Context) (*Stats, error) {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode == http.StatusUnauthorized {
 		return nil, fmt.Errorf("网关拒绝鉴权（401）：请检查 api_key 是否正确")
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return &Stats{
+			Enabled: false,
+			Message: "当前网关未提供 /v1/stats —— 该端点是本面板配套网关版本的扩展，" +
+				"官方上游（Sliverkiss）版本暂未包含。面板其余功能不受影响。",
+		}, nil
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("网关 /v1/stats 返回 HTTP %d: %s", resp.StatusCode, truncate(string(raw), 200))
